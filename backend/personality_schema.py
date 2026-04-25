@@ -121,3 +121,7 @@ class AnswerResponse(BaseModel):
     trait_deltas: Dict[str, float]
     planet_changes: List[PlanetChange]
     insight: str
+    follow_up: Optional[str] = Field(
+        default=None,
+        description="深度追问——当回答触及情感深处时，一句穿透力更强的追问；否则 null",
+    )

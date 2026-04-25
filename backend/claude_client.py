@@ -117,19 +117,15 @@ _EXTRACT_SYSTEM = """\
 - 只改变明确被回答暗示的维度，不要猜测无关维度
 - planet_changes 要具体、诗意，像是星球地貌变化的旁观描述
 - insight 是一句话，有点文学性，描述这个人的某种特质
+- follow_up：如果这个回答触及了情感深处或有值得深挖的细节，写一句穿透力强的追问（15字以内，口语化，像朋友在认真听完后的一句追问）；如果回答很浅、很敷衍、或已经说得很完整，则设为 null
 
 你必须以 JSON 格式回复，结构如下：
-{
-  "deltas": {
-    "维度名": delta值,
-    ...
-  },
-  "planet_changes": [
-    {"feature": "地貌特征", "change": "变化描述"},
-    ...
-  ],
-  "insight": "一句诗意的旁白"
-}
+
+回答较浅时示例（follow_up 为 null）：
+{"deltas":{"extraversion":0.1},"planet_changes":[{"feature":"向阳草甸","change":"面积扩大了一些"}],"insight":"你的星球更喜欢有人陪伴的地方。","follow_up":null}
+
+回答有深度时示例（follow_up 有值）：
+{"deltas":{"emotional_depth":0.15,"memory_strength":0.08},"planet_changes":[{"feature":"深海暗礁","change":"在星球南极悄然浮现"}],"insight":"你把很多东西压在水下，但水面一直是平的。","follow_up":"那个让你觉得很委屈但没说出口的人，后来怎么样了？"}
 """
 
 _EXTRACT_USER_TMPL = """\
@@ -217,6 +213,7 @@ MOCK_ANSWER_RESPONSE = {
         {"feature": "共鸣石碑", "change": "从地面缓缓升起"},
     ],
     "insight": "你的星球开始有了声音——不是噪音，是某种只有你听得懂的语言。",
+    "follow_up": None,
 }
 
 
@@ -273,13 +270,14 @@ def extract_traits(
     question: str,
     answer: str,
     current_traits: TraitVector,
-) -> tuple[TraitVector, Dict[str, float], List[PlanetChange], str]:
+) -> tuple[TraitVector, Dict[str, float], List[PlanetChange], str, str | None]:
     """
     从用户回答中提取性格变化，返回：
     - 更新后的 TraitVector
     - 原始 deltas（调试用）
     - 星球变化列表
     - insight 旁白
+    - follow_up 深度追问（若回答有深度则有值，否则 None）
     """
     user_msg = _EXTRACT_USER_TMPL.format(question=question, answer=answer)
 
@@ -290,12 +288,13 @@ def extract_traits(
         deltas = data["deltas"]
         planet_changes = [PlanetChange(**c) for c in data["planet_changes"]]
         insight = data["insight"]
+        follow_up = data.get("follow_up")
         updated_traits = current_traits.apply_deltas(deltas)
-        return updated_traits, deltas, planet_changes, insight
+        return updated_traits, deltas, planet_changes, insight, follow_up
 
     message = get_client().messages.create(
         model="claude-opus-4-6",
-        max_tokens=512,
+        max_tokens=600,
         system=_EXTRACT_SYSTEM,
         messages=[{"role": "user", "content": user_msg}],
     )
@@ -308,10 +307,11 @@ def extract_traits(
     deltas: Dict[str, float] = data.get("deltas", {})
     planet_changes = [PlanetChange(**c) for c in data.get("planet_changes", [])]
     insight: str = data.get("insight", "")
+    follow_up: str | None = data.get("follow_up") or None  # 空字符串也转 None
 
     updated_traits = current_traits.apply_deltas(deltas)
 
-    return updated_traits, deltas, planet_changes, insight
+    return updated_traits, deltas, planet_changes, insight, follow_up
 
 
 # ---------------------------------------------------------------------------

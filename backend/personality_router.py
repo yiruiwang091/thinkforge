@@ -77,16 +77,17 @@ def submit_answer(payload: AnswerRequest) -> AnswerResponse:
         raise HTTPException(status_code=400, detail="回答不能为空")
 
     try:
-        updated_traits, deltas, planet_changes, insight = extract_traits(
+        updated_traits, deltas, planet_changes, insight, follow_up = extract_traits(
             question=payload.question,
             answer=payload.answer,
             current_traits=payload.current_traits,
         )
 
         logger.info(
-            "answer processed | deltas=%s | changes=%d",
+            "answer processed | deltas=%s | changes=%d | follow_up=%s",
             list(deltas.keys()),
             len(planet_changes),
+            bool(follow_up),
         )
 
         return AnswerResponse(
@@ -94,6 +95,7 @@ def submit_answer(payload: AnswerRequest) -> AnswerResponse:
             trait_deltas=deltas,
             planet_changes=planet_changes,
             insight=insight,
+            follow_up=follow_up,
         )
 
     except ValueError as e:

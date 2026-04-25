@@ -246,7 +246,8 @@ function PlanetTab({ user }) {
   const [loading, setLoading]         = useState(false)
   const [planetChanges, setPlanetChanges] = useState([])
   const [insight, setInsight]         = useState(null)
-  const [phase, setPhase]             = useState('loading') // loading|idle|questioning|result|dormant
+  const [followUp, setFollowUp]       = useState(null)   // 深度追问
+  const [phase, setPhase]             = useState('loading') // loading|welcome|idle|questioning|result|dormant
   const [error, setError]             = useState(null)
   const [cloudError, setCloudError]   = useState(null)
   const [savedCount, setSavedCount]   = useState(0)
@@ -305,7 +306,13 @@ function PlanetTab({ user }) {
       setTraits(loadedTraits)
       setHistory(loadedHistory)
 
-      // 4. 消费道场事件，然后拿第一题
+      // 4. 新用户（从未回答过任何问题）→ 欢迎页
+      if (loadedHistory.length === 0) {
+        setPhase('welcome')
+        return
+      }
+
+      // 5. 老用户：消费道场事件，然后拿下一题
       const arenaEvent = loadArenaEvent()
       if (arenaEvent) clearArenaEvent()
       await fetchNextQuestion(loadedTraits, loadedHistory, arenaEvent)
@@ -345,6 +352,7 @@ function PlanetTab({ user }) {
     setLoading(true)
     setPhase('questioning')
     setInsight(null)
+    setFollowUp(null)
     setError(null)
 
     const currentTraits  = overrideTraits   ?? traits
@@ -405,6 +413,7 @@ function PlanetTab({ user }) {
       setHistory(newHistory)
       setPlanetChanges(data.planet_changes ?? [])
       setInsight(data.insight ?? null)
+      setFollowUp(data.follow_up ?? null)
       setPhase('result')
 
       // 云端保存（非阻塞）
@@ -555,6 +564,27 @@ function PlanetTab({ user }) {
                 onSaved={() => setSavedCount(c => c + 1)}
               />
             )}
+            {followUp && (
+              <FollowUpCard
+                followUp={followUp}
+                onAccept={() => {
+                  // 把追问变成下一题，直接进入 questioning 阶段（不调后端）
+                  setCurrentQ({
+                    question: followUp,
+                    dimension_focus: 'emotional_depth',
+                    hint: '深度追问',
+                    options: null,
+                  })
+                  setFollowUp(null)
+                  setInsight(null)
+                  setPlanetChanges([])
+                  setAnswer('')
+                  setPhase('questioning')
+                  setTimeout(() => textareaRef.current?.focus(), 100)
+                }}
+                onSkip={() => fetchNextQuestion()}
+              />
+            )}
             {planetChanges.length > 0 && (
               <div className="space-y-2">
                 <p className="text-xs text-slate-400 font-medium">星球新增</p>
@@ -569,13 +599,19 @@ function PlanetTab({ user }) {
                 ))}
               </div>
             )}
-            <button
-              onClick={() => fetchNextQuestion()}
-              className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium py-3 rounded-xl transition-colors"
-            >
-              继续探索 →
-            </button>
+            {!followUp && (
+              <button
+                onClick={() => fetchNextQuestion()}
+                className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium py-3 rounded-xl transition-colors"
+              >
+                继续探索 →
+              </button>
+            )}
           </div>
+        )}
+
+        {phase === 'welcome' && (
+          <WelcomeScreen onStart={() => fetchNextQuestion(INITIAL_TRAITS, [], null)} />
         )}
 
         {phase === 'idle' && (
@@ -1269,6 +1305,108 @@ function TraitDebugPanel({ traits }) {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// ── WelcomeScreen（新用户引导）──────────────────────────────────────────────
+
+function WelcomeScreen({ onStart }) {
+  const FEATURES = [
+    {
+      icon: '🪐',
+      title: '你有一颗专属星球',
+      desc: '它会随着你的每一个回答，生长出独一无二的地貌——山脉、海洋、晶体林、灯塔……',
+    },
+    {
+      icon: '💬',
+      title: '没有对错，只有真实',
+      desc: '我们会问你一些日常小问题。你的回答越真实，星球就越接近真实的你。',
+    },
+    {
+      icon: '🔍',
+      title: '发现你自己',
+      desc: '积累足够的回答后，你会得到一份专属画像——关于你是什么样的人。',
+    },
+  ]
+
+  return (
+    <div className="space-y-8 py-2">
+      {/* 主标题 */}
+      <div className="text-center space-y-3 pt-2">
+        <p className="text-slate-500 text-xs tracking-widest uppercase">欢迎来到</p>
+        <h2 className="text-3xl font-bold text-white leading-tight">
+          你的<span className="text-indigo-400">星球</span>
+        </h2>
+        <p className="text-slate-400 text-sm leading-relaxed max-w-xs mx-auto">
+          这里没有测试，没有标准答案。<br />只有一颗在等待认识你的星球。
+        </p>
+      </div>
+
+      {/* 功能卡片 */}
+      <div className="space-y-3">
+        {FEATURES.map((f, i) => (
+          <div
+            key={i}
+            className="flex items-start gap-4 bg-slate-800/60 rounded-2xl px-5 py-4 border border-slate-700/50"
+          >
+            <span className="text-2xl mt-0.5 shrink-0">{f.icon}</span>
+            <div>
+              <p className="text-sm font-medium text-slate-200 mb-1">{f.title}</p>
+              <p className="text-xs text-slate-500 leading-relaxed">{f.desc}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* CTA */}
+      <button
+        onClick={onStart}
+        className="w-full bg-indigo-600 hover:bg-indigo-500 active:scale-[0.98] text-white font-semibold py-4 rounded-2xl transition-all text-base"
+      >
+        开始探索我的星球 →
+      </button>
+
+      <p className="text-center text-xs text-slate-600">
+        随时可以暂停，数据会保存在云端
+      </p>
+    </div>
+  )
+}
+
+// ── FollowUpCard（深度追问卡）───────────────────────────────────────────────
+
+function FollowUpCard({ followUp, onAccept, onSkip }) {
+  return (
+    <div className="border border-violet-500/40 bg-violet-500/8 rounded-2xl p-5 space-y-4">
+      {/* 标签 */}
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-bold tracking-widest text-violet-400 uppercase bg-violet-500/15 px-2 py-0.5 rounded-full">
+          深度追问
+        </span>
+        <span className="text-xs text-slate-500">星球想多问一句</span>
+      </div>
+
+      {/* 追问内容 */}
+      <p className="text-slate-200 text-base leading-relaxed font-medium">
+        {followUp}
+      </p>
+
+      {/* 操作按钮 */}
+      <div className="flex gap-2">
+        <button
+          onClick={onAccept}
+          className="flex-1 bg-violet-600 hover:bg-violet-500 active:scale-[0.98] text-white text-sm font-medium py-2.5 rounded-xl transition-all"
+        >
+          回应这个 →
+        </button>
+        <button
+          onClick={onSkip}
+          className="px-4 bg-slate-800 hover:bg-slate-700 text-slate-400 text-sm py-2.5 rounded-xl transition-colors"
+        >
+          跳过
+        </button>
+      </div>
     </div>
   )
 }
