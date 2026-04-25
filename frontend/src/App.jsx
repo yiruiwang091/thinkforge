@@ -85,16 +85,16 @@ export default function App() {
 
       {/* Tab bar */}
       <div className="flex border-b border-slate-800 px-6">
-        <TabBtn active={tab === 'planet'} onClick={() => setTab('planet')} label="我的星球" icon="🪐" />
-        <TabBtn active={tab === 'arena'} onClick={() => setTab('arena')} label="思维道场" icon="⚔️" />
+        <TabBtn active={tab === 'planet'}  onClick={() => setTab('planet')}  label="我的星球" icon="🪐" />
+        <TabBtn active={tab === 'explore'} onClick={() => setTab('explore')} label="探索星球" icon="🌍" />
+        <TabBtn active={tab === 'arena'}   onClick={() => setTab('arena')}   label="思维道场" icon="⚔️" />
       </div>
 
       {/* Content */}
       <main className="flex-1 overflow-auto">
-        {tab === 'planet'
-          ? <PlanetTab user={user} />
-          : <ArenaTab onSwitchToPlanet={() => setTab('planet')} />
-        }
+        {tab === 'planet'  && <PlanetTab user={user} onOpenExplore={() => setTab('explore')} />}
+        {tab === 'explore' && <ExploreTab user={user} />}
+        {tab === 'arena'   && <ArenaTab onSwitchToPlanet={() => setTab('planet')} />}
       </main>
     </div>
   )
@@ -238,7 +238,7 @@ const PHASE_LABELS = {
 
 // ── PlanetTab ────────────────────────────────────────────────────────────────
 
-function PlanetTab({ user }) {
+function PlanetTab({ user, onOpenExplore }) {
   const [traits, setTraits]           = useState(INITIAL_TRAITS)
   const [history, setHistory]         = useState([])
   const [currentQ, setCurrentQ]       = useState(null)
@@ -451,7 +451,7 @@ function PlanetTab({ user }) {
   return (
     <div className="max-w-lg mx-auto px-6 py-8 space-y-8">
 
-      <PlanetVisual traits={traits} questionCount={history.length} latestChanges={planetChanges} />
+      <PlanetVisual traits={traits} questionCount={history.length} latestChanges={planetChanges} onClick={onOpenExplore} />
 
       {cloudError && (
         <p className="text-xs text-amber-600 text-center">{cloudError}</p>
@@ -792,124 +792,111 @@ function buildPlanetTexture(THREE, traits, questionCount) {
 function PlanetVisual({ traits, questionCount, latestChanges }) {
 
   const mountRef = useRef(null)
+  const sceneRef = useRef(null)   // { sphere, THREE, renderer }
 
+  // ── 初始化 Three.js（只跑一次，空 deps）──────────────────────────────────
   useEffect(() => {
-    import('three').then((THREE) => {
-      const container = mountRef.current
-      if (!container) return
+    let animId, renderer, cancelled = false
 
-      // ── Renderer ─────────────────────────────────────────────────────────
-      const W = container.clientWidth, H = container.clientHeight
-      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+    import('three').then((THREE) => {
+      if (cancelled || !mountRef.current) return
+      const container = mountRef.current
+      const S = container.clientWidth || 340
+
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
       renderer.setPixelRatio(window.devicePixelRatio)
-      renderer.setSize(W, H)
+      renderer.setSize(S, S)
       renderer.setClearColor(0x000000, 0)
       container.appendChild(renderer.domElement)
 
-      // ── Scene & Camera ───────────────────────────────────────────────────
       const scene  = new THREE.Scene()
-      const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 1000)
-      camera.position.set(0, 0.8, 2.6)  // 略微俯视
+      const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000)
+      camera.position.set(0, 0.8, 2.6)
       camera.lookAt(0, 0, 0)
 
-      // ── Stars ────────────────────────────────────────────────────────────
-      const starGeo = new THREE.BufferGeometry()
+      // 星空背景
       const starPos = new Float32Array(1800)
       for (let i = 0; i < 1800; i += 3) {
-        const theta = Math.random() * Math.PI * 2
-        const phi   = Math.acos(2 * Math.random() - 1)
-        const r     = 40 + Math.random() * 20
-        starPos[i]   = r * Math.sin(phi) * Math.cos(theta)
-        starPos[i+1] = r * Math.sin(phi) * Math.sin(theta)
-        starPos[i+2] = r * Math.cos(phi)
+        const th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1), r = 40 + Math.random() * 20
+        starPos[i] = r*Math.sin(ph)*Math.cos(th); starPos[i+1] = r*Math.sin(ph)*Math.sin(th); starPos[i+2] = r*Math.cos(ph)
       }
+      const starGeo = new THREE.BufferGeometry()
       starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3))
-      scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({
-        color: 0xfff5e0, size: 0.12, transparent: true, opacity: 0.8,
-      })))
+      scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xfff5e0, size: 0.12, transparent: true, opacity: 0.8 })))
 
-      // ── Planet ───────────────────────────────────────────────────────────
-      const texture  = buildPlanetTexture(THREE, traits, questionCount)
-      const geo      = new THREE.SphereGeometry(1, 64, 64)
-      const mat      = new THREE.MeshPhongMaterial({
-        map:       texture,
-        shininess: 18,
-        specular:  new THREE.Color(0x222244),
-      })
+      // 星球球体
+      const geo = new THREE.SphereGeometry(1, 64, 64)
+      const mat = new THREE.MeshPhongMaterial({ shininess: 18, specular: new THREE.Color(0x222244) })
       const sphere = new THREE.Mesh(geo, mat)
       scene.add(sphere)
 
-      // ── Atmosphere glow (additive shell) ────────────────────────────────
-      const atmoMat = new THREE.MeshPhongMaterial({
-        color:       new THREE.Color(0x4466ff),
-        transparent: true,
-        opacity:     0.06,
-        side:        THREE.FrontSide,
-      })
-      scene.add(new THREE.Mesh(new THREE.SphereGeometry(1.04, 32, 32), atmoMat))
+      // 大气层
+      scene.add(new THREE.Mesh(
+        new THREE.SphereGeometry(1.04, 32, 32),
+        new THREE.MeshPhongMaterial({ color: 0x4466ff, transparent: true, opacity: 0.06 })
+      ))
 
-      // ── Lights ───────────────────────────────────────────────────────────
+      // 光照
       scene.add(new THREE.AmbientLight(0x223355, 0.6))
       const sun = new THREE.DirectionalLight(0xffd090, 1.4)
-      sun.position.set(5, 3, 4)
-      scene.add(sun)
+      sun.position.set(5, 3, 4); scene.add(sun)
 
-      // ── Drag + Zoom controls ─────────────────────────────────────────────
-      let isDragging = false
-      let prevX = 0, prevY = 0
-      let velX = 0, velY = 0
+      // 初始纹理
+      const tex = buildPlanetTexture(THREE, traits, questionCount)
+      mat.map = tex; mat.needsUpdate = true
 
-      const onDown = (e) => {
-        isDragging = true
-        prevX = e.clientX ?? e.touches?.[0]?.clientX ?? 0
-        prevY = e.clientY ?? e.touches?.[0]?.clientY ?? 0
-        velX = velY = 0
-      }
-      const onMove = (e) => {
+      // 存入 ref，供纹理更新 effect 使用
+      sceneRef.current = { sphere, mat, THREE, renderer, scene, camera }
+
+      // 拖拽 + 缩放
+      let isDragging = false, prevX = 0, prevY = 0, velX = 0, velY = 0
+      const el = renderer.domElement
+      const onDown = e => { isDragging = true; prevX = e.clientX ?? e.touches?.[0]?.clientX; prevY = e.clientY ?? e.touches?.[0]?.clientY; velX = velY = 0 }
+      const onMove = e => {
         if (!isDragging) return
-        const cx = e.clientX ?? e.touches?.[0]?.clientX ?? 0
-        const cy = e.clientY ?? e.touches?.[0]?.clientY ?? 0
-        velX = (cx - prevX) * 0.005
-        velY = (cy - prevY) * 0.005
+        const cx = e.clientX ?? e.touches?.[0]?.clientX, cy = e.clientY ?? e.touches?.[0]?.clientY
+        velX = (cx - prevX) * 0.005; velY = (cy - prevY) * 0.005
         sphere.rotation.y += velX
-        sphere.rotation.x += velY
-        sphere.rotation.x = Math.max(-1.2, Math.min(1.2, sphere.rotation.x))
+        sphere.rotation.x = Math.max(-1.2, Math.min(1.2, sphere.rotation.x + velY))
         prevX = cx; prevY = cy
       }
-      const onUp   = () => { isDragging = false }
-      const onWheel = (e) => {
+      const onUp = () => { isDragging = false }
+      el.addEventListener('mousedown', onDown); el.addEventListener('mousemove', onMove)
+      el.addEventListener('mouseup', onUp);     el.addEventListener('mouseleave', onUp)
+      el.addEventListener('touchstart', onDown, { passive: true })
+      el.addEventListener('touchmove',  onMove, { passive: true })
+      el.addEventListener('touchend',   onUp)
+      el.addEventListener('wheel', e => {
         camera.position.z = Math.max(1.4, Math.min(5, camera.position.z + e.deltaY * 0.003))
-      }
+      }, { passive: true })
 
-      renderer.domElement.addEventListener('mousedown',  onDown)
-      renderer.domElement.addEventListener('mousemove',  onMove)
-      renderer.domElement.addEventListener('mouseup',    onUp)
-      renderer.domElement.addEventListener('mouseleave', onUp)
-      renderer.domElement.addEventListener('touchstart', onDown, { passive: true })
-      renderer.domElement.addEventListener('touchmove',  onMove, { passive: true })
-      renderer.domElement.addEventListener('touchend',   onUp)
-      renderer.domElement.addEventListener('wheel',      onWheel, { passive: true })
-
-      // ── Animation loop ───────────────────────────────────────────────────
-      let animId
       function animate() {
         animId = requestAnimationFrame(animate)
-        if (!isDragging) {
-          sphere.rotation.y += 0.0015 + velX
-          velX *= 0.94; velY *= 0.94
-        }
+        if (!isDragging) { sphere.rotation.y += 0.0015 + velX * 0.1; velX *= 0.94; velY *= 0.94 }
         renderer.render(scene, camera)
       }
       animate()
-
-      // ── Cleanup ──────────────────────────────────────────────────────────
-      return () => {
-        cancelAnimationFrame(animId)
-        renderer.dispose()
-        if (container.contains(renderer.domElement)) container.removeChild(renderer.domElement)
-      }
     })
-  }, [traits, questionCount])
+
+    return () => {
+      cancelled = true
+      if (animId) cancelAnimationFrame(animId)
+      renderer?.dispose()
+      try { if (mountRef.current && renderer?.domElement) mountRef.current.removeChild(renderer.domElement) } catch {}
+      sceneRef.current = null
+    }
+  }, [])   // ← 空 deps，只初始化一次
+
+  // ── traits / questionCount 变化时单独更新纹理 ──────────────────────────────
+  useEffect(() => {
+    const ref = sceneRef.current
+    if (!ref) return
+    const { mat, THREE } = ref
+    const tex = buildPlanetTexture(THREE, traits, questionCount)
+    mat.map = tex
+    mat.needsUpdate = true
+    tex.needsUpdate = true
+  }, [JSON.stringify(traits), questionCount])
 
   const depthLabel = questionCount === 0
     ? '等待第一道光…'
@@ -918,14 +905,26 @@ function PlanetVisual({ traits, questionCount, latestChanges }) {
     : `已探索 ${questionCount} 题 · 精微`
 
   return (
-    <div className="relative w-full rounded-2xl overflow-hidden bg-slate-950" style={{ aspectRatio: '1 / 1' }}>
-      <div ref={mountRef} className="absolute inset-0" style={{ cursor: 'grab' }} />
-      <p className="absolute bottom-2 left-0 right-0 text-center text-xs text-slate-500 pointer-events-none">
-        {depthLabel}
-      </p>
+    <div
+      className="relative w-full rounded-2xl overflow-hidden bg-slate-950 group"
+      style={{ aspectRatio: '1 / 1' }}
+      onClick={onClick}
+    >
+      <div ref={mountRef} className="absolute inset-0" style={{ cursor: onClick ? 'pointer' : 'grab' }}
+        onClick={e => { if (!onClick) return; e.stopPropagation() }}
+      />
+      <div className="absolute bottom-3 left-0 right-0 flex flex-col items-center gap-0.5 pointer-events-none">
+        <p className="text-xs text-slate-500">{depthLabel}</p>
+        {onClick && (
+          <p className="text-[10px] text-amber-400/50 group-hover:text-amber-400/80 transition-colors">
+            点击进入星球 →
+          </p>
+        )}
+      </div>
     </div>
   )
 }
+
 
 
 // ── TraitDebugPanel ──────────────────────────────────────────────────────────
@@ -1323,6 +1322,181 @@ function FollowUpCard({ followUp, onAccept, onSkip }) {
         >
           跳过
         </button>
+      </div>
+    </div>
+  )
+}
+
+// ── ExploreTab（探索星球）────────────────────────────────────────────────────
+
+const PLANET_FEATURES = [
+  { id: 'ocean',   name: '情感之海',   emoji: '🌊', trait: 'emotional_depth',     hi: true,  threshold: 3,  desc: v => `覆盖星球 ${Math.round(v*100)}% 的表面，随你的情绪涨落。`         },
+  { id: 'volcano', name: '觉醒火山',   emoji: '🌋', trait: 'sensation_seeking',   hi: true,  threshold: 5,  desc: v => `活跃度 ${Math.round(v*100)}%，是你对刺激与突破渴望的具象。`     },
+  { id: 'crystal', name: '创造晶体',   emoji: '💎', trait: 'creativity',          hi: true,  threshold: 5,  desc: v => `覆盖 ${Math.round(v*100)}% 高地，每块都是未实现的奇思妙想。`    },
+  { id: 'forest',  name: '语言森林',   emoji: '🌿', trait: 'language_sensitivity',hi: true,  threshold: 6,  desc: v => `密度 ${Math.round(v*100)}%，每棵树是一个让你心动的句子。`        },
+  { id: 'city',    name: '聚落广场',   emoji: '🏘️', trait: 'extraversion',        hi: true,  threshold: 6,  desc: v => `${Math.round(v*100)}% 的表面有人居住，热闹而明亮。`             },
+  { id: 'ruins',   name: '古城遗迹',   emoji: '🏛️', trait: 'memory_strength',     hi: true,  threshold: 8,  desc: v => `保存度 ${Math.round(v*100)}%，你的星球从不真正遗忘。`           },
+  { id: 'tower',   name: '孤独灯塔',   emoji: '🗼', trait: 'independence',         hi: true,  threshold: 8,  desc: v => `照亮半径 ${Math.round(v*100)}%，黑暗中你倾向独自找方向。`       },
+  { id: 'cave',    name: '直觉洞穴',   emoji: '🌀', trait: 'intuitive',            hi: true,  threshold: 5,  desc: v => `深度 ${Math.round(v*100)}%，感觉总比逻辑先一步到达。`           },
+  { id: 'desert',  name: '冷静沙漠',   emoji: '🏜️', trait: 'sensation_seeking',   hi: false, threshold: 8,  desc: v => `覆盖 ${Math.round((1-v)*100)}% 的土地，安静而稳定。`           },
+  { id: 'library', name: '星际图书馆', emoji: '📚', trait: 'language_sensitivity', hi: false, threshold: 10, desc: v => `藏书 ${Math.round((1-v)*100)}% 页，理性与文字并肩而行。`       },
+]
+
+function ExploreTab({ user }) {
+  const [traits, setTraits]       = useState(INITIAL_TRAITS)
+  const [history, setHistory]     = useState([])
+  const [loading, setLoading]     = useState(true)
+  const [shareMsg, setShareMsg]   = useState(null)
+  const [visitTraits, setVisitTraits]   = useState(null)  // 访客模式
+  const [visitHistory, setVisitHistory] = useState([])
+
+  // 从 URL 读取 ?visit=userId
+  const visitId = new URLSearchParams(window.location.search).get('visit')
+
+  useEffect(() => {
+    async function load() {
+      // 先加载自己的数据
+      const { data: myState } = await supabase
+        .from('planet_states').select('traits, question_count').eq('user_id', user.id).maybeSingle()
+      if (myState) setTraits(myState.traits)
+      const { data: myHist } = await supabase
+        .from('question_history').select('question,answer').eq('user_id', user.id).order('created_at')
+      if (myHist) setHistory(myHist)
+
+      // 如果 URL 有 visit 参数，再加载访客星球
+      if (visitId && visitId !== user.id) {
+        const { data: vs } = await supabase
+          .from('planet_states').select('traits, question_count').eq('user_id', visitId).maybeSingle()
+        const { data: vh } = await supabase
+          .from('question_history').select('question,answer').eq('user_id', visitId).order('created_at')
+        if (vs) { setVisitTraits(vs.traits); setVisitHistory(vh ?? []) }
+      }
+      setLoading(false)
+    }
+    load()
+  }, [user.id])
+
+  const displayTraits  = visitTraits ?? traits
+  const displayHistory = visitTraits ? visitHistory : history
+  const isVisiting     = !!visitTraits
+
+  // 已解锁地标（trait 明显偏离 0.5 且 questionCount 达到）
+  const unlocked = PLANET_FEATURES.filter(f => {
+    const val = displayTraits[f.trait] ?? 0.5
+    const triggered = f.hi ? val >= 0.58 : val <= 0.42
+    return triggered && displayHistory.length >= f.threshold
+  })
+
+  function handleShare() {
+    const url = `${window.location.origin}/?visit=${user.id}`
+    navigator.clipboard.writeText(url).then(() => {
+      setShareMsg('链接已复制！发给朋友，让他们来拜访你的星球 🪐')
+      setTimeout(() => setShareMsg(null), 3000)
+    }).catch(() => setShareMsg(url))
+  }
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-20">
+      <p className="text-slate-500 text-sm animate-pulse">加载星球数据…</p>
+    </div>
+  )
+
+  return (
+    <div className="max-w-lg mx-auto px-6 py-8 space-y-6">
+
+      {isVisiting && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 text-sm text-amber-300">
+          🌍 你正在拜访这颗星球（只读模式）
+        </div>
+      )}
+
+      {/* 大星球 */}
+      <PlanetVisual
+        traits={displayTraits}
+        questionCount={displayHistory.length}
+        latestChanges={[]}
+      />
+
+      {/* 分享 */}
+      {!isVisiting && (
+        <div className="space-y-2">
+          <button
+            onClick={handleShare}
+            className="w-full border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 text-sm font-medium py-3 rounded-xl transition-colors"
+          >
+            🔗 分享我的星球给朋友
+          </button>
+          {shareMsg && (
+            <p className="text-xs text-center text-amber-300/80 break-all">{shareMsg}</p>
+          )}
+        </div>
+      )}
+
+      {/* 已解锁地标 */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium text-slate-300">已发现的地标</p>
+          <p className="text-xs text-slate-500">{unlocked.length} / {PLANET_FEATURES.length} 个</p>
+        </div>
+
+        {unlocked.length === 0 && (
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center">
+            <p className="text-3xl mb-3">🌑</p>
+            <p className="text-slate-400 text-sm">还没有解锁任何地标</p>
+            <p className="text-slate-600 text-xs mt-1">继续回答问题，星球会逐渐苏醒</p>
+          </div>
+        )}
+
+        {unlocked.map(f => {
+          const val = displayTraits[f.trait] ?? 0.5
+          return (
+            <div key={f.id} className="flex items-start gap-4 bg-slate-900 border border-slate-800 rounded-2xl px-5 py-4">
+              <span className="text-3xl shrink-0">{f.emoji}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-slate-200 mb-1">{f.name}</p>
+                <p className="text-xs text-slate-500 leading-relaxed">{f.desc(val)}</p>
+                {/* 进度条 */}
+                <div className="mt-2 bg-slate-800 rounded-full h-1">
+                  <div
+                    className="bg-amber-400 h-1 rounded-full transition-all duration-700"
+                    style={{ width: `${(f.hi ? val : 1 - val) * 100}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          )
+        })}
+
+        {/* 未解锁的（用锁图标显示有多少隐藏） */}
+        {PLANET_FEATURES.length - unlocked.length > 0 && displayHistory.length > 0 && (
+          <p className="text-center text-xs text-slate-600 py-2">
+            还有 {PLANET_FEATURES.length - unlocked.length} 个地标等待被发现……
+          </p>
+        )}
+      </div>
+
+      {/* 探索进度 */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl px-5 py-4 space-y-3">
+        <p className="text-xs font-medium text-slate-400">星球探索进度</p>
+        {Object.entries(TRAIT_LABELS).map(([key, label]) => {
+          const val = displayTraits[key] ?? 0.5
+          const deviation = Math.abs(val - 0.5) * 2  // 0=中性 1=极端
+          return (
+            <div key={key} className="flex items-center gap-3">
+              <span className="text-xs text-slate-500 w-16 shrink-0">{label}</span>
+              <div className="flex-1 bg-slate-800 rounded-full h-1.5 relative">
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-px h-full bg-slate-700" />
+                </div>
+                {val >= 0.5
+                  ? <div className="absolute left-1/2 bg-amber-400 h-1.5 rounded-r-full transition-all duration-500" style={{ width: `${(val - 0.5) * 100}%` }} />
+                  : <div className="absolute right-1/2 bg-violet-400 h-1.5 rounded-l-full transition-all duration-500" style={{ width: `${(0.5 - val) * 100}%` }} />
+                }
+              </div>
+              <span className="text-xs text-slate-600 w-8 text-right">{deviation < 0.1 ? '—' : val > 0.5 ? '↑' : '↓'}</span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
