@@ -154,7 +154,7 @@ function AuthModal() {
             placeholder="邮箱地址"
             required
             autoComplete="email"
-            className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+            className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-500"
           />
           <input
             type="password"
@@ -164,7 +164,7 @@ function AuthModal() {
             required
             minLength={6}
             autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-            className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+            className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-500"
           />
 
           {error   && <p className="text-red-400   text-xs px-1">{error}</p>}
@@ -173,7 +173,7 @@ function AuthModal() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium py-3 rounded-xl transition-colors"
+            className="w-full bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium py-3 rounded-xl transition-colors"
           >
             {loading ? '处理中…' : mode === 'login' ? '登录' : '注册'}
           </button>
@@ -198,7 +198,7 @@ function TabBtn({ active, onClick, label, icon }) {
       onClick={onClick}
       className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
         active
-          ? 'border-indigo-400 text-indigo-300'
+          ? 'border-amber-400 text-amber-300'
           : 'border-transparent text-slate-500 hover:text-slate-300'
       }`}
     >
@@ -442,6 +442,12 @@ function PlanetTab({ user }) {
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
+
+  // 欢迎页全屏，不受容器约束
+  if (phase === 'welcome') {
+    return <WelcomeScreen onStart={() => fetchNextQuestion(INITIAL_TRAITS, [], null)} />
+  }
+
   return (
     <div className="max-w-lg mx-auto px-6 py-8 space-y-8">
 
@@ -464,7 +470,7 @@ function PlanetTab({ user }) {
           {history.length >= 5 && (
             <button
               onClick={() => setShowPortrait(true)}
-              className="text-xs px-3 py-1.5 rounded-full border border-indigo-500/40 text-indigo-400 hover:bg-indigo-500/10 transition-colors"
+              className="text-xs px-3 py-1.5 rounded-full border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 transition-colors"
             >
               查看画像 →
             </button>
@@ -493,7 +499,7 @@ function PlanetTab({ user }) {
             {/* 问题卡片 */}
             <div className="bg-slate-800 rounded-2xl p-5">
               {currentQ.hint && (
-                <span className="text-xs text-indigo-400 font-medium mb-2 block">{currentQ.hint}</span>
+                <span className="text-xs text-amber-400 font-medium mb-2 block">{currentQ.hint}</span>
               )}
               <p className="text-lg font-medium text-white leading-relaxed">{currentQ.question}</p>
             </div>
@@ -510,8 +516,8 @@ function PlanetTab({ user }) {
                     }}
                     className={`rounded-xl px-3 py-2.5 text-sm text-left transition-all border ${
                       answer === opt
-                        ? 'bg-indigo-600/30 border-indigo-500 text-indigo-200'
-                        : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-indigo-500/50 hover:text-slate-100'
+                        ? 'bg-amber-500/20 border-amber-400 text-amber-200'
+                        : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-amber-500/50 hover:text-slate-100'
                     }`}
                   >
                     {opt}
@@ -528,7 +534,7 @@ function PlanetTab({ user }) {
                 onChange={e => setAnswer(e.target.value)}
                 rows={3}
                 placeholder={currentQ.options ? '或者自己说说…（可补充细节）' : '说说你的想法…'}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 pr-12 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none"
+                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 pr-12 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-500 resize-none"
                 onKeyDown={e => {
                   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSubmitAnswer()
                 }}
@@ -547,7 +553,7 @@ function PlanetTab({ user }) {
             <button
               onClick={handleSubmitAnswer}
               disabled={loading || !answer.trim()}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium py-3 rounded-xl transition-colors"
+              className="w-full bg-amber-400 hover:bg-amber-300 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-semibold py-3 rounded-xl transition-colors"
             >
               {loading ? '星球感知中…' : '提交 ↵'}
             </button>
@@ -610,14 +616,10 @@ function PlanetTab({ user }) {
           </div>
         )}
 
-        {phase === 'welcome' && (
-          <WelcomeScreen onStart={() => fetchNextQuestion(INITIAL_TRAITS, [], null)} />
-        )}
-
         {phase === 'idle' && (
           <button
             onClick={() => fetchNextQuestion()}
-            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-3 rounded-xl transition-colors"
+            className="w-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-semibold py-3 rounded-xl transition-colors"
           >
             开始探索
           </button>
@@ -632,7 +634,7 @@ function PlanetTab({ user }) {
             </div>
             <button
               onClick={() => fetchNextQuestion()}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-3 rounded-xl transition-colors"
+              className="w-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-semibold py-3 rounded-xl transition-colors"
             >
               唤醒星球
             </button>
@@ -646,7 +648,7 @@ function PlanetTab({ user }) {
         )}
       </div>
 
-      {history.length > 0 && <TraitDebugPanel traits={traits} />}
+      {history.length > 0 && import.meta.env.DEV && <TraitDebugPanel traits={traits} />}
 
       <SavedInsightsPanel userId={user.id} refreshKey={savedCount} />
 
@@ -1096,8 +1098,8 @@ function PortraitModal({ traits, history, onClose }) {
         {portrait && (
           <>
             {/* 标题卡 */}
-            <div className="bg-slate-900 border border-indigo-500/30 rounded-2xl p-6 text-center space-y-3">
-              <p className="text-indigo-400 text-xs font-medium tracking-widest uppercase">你是</p>
+            <div className="bg-slate-900 border border-amber-500/30 rounded-2xl p-6 text-center space-y-3">
+              <p className="text-amber-400 text-xs font-medium tracking-widest uppercase">你是</p>
               <h2 className="text-2xl font-bold text-white">{portrait.title}</h2>
               <p className="text-slate-300 text-sm leading-relaxed">{portrait.core}</p>
             </div>
@@ -1312,64 +1314,69 @@ function TraitDebugPanel({ traits }) {
 // ── WelcomeScreen（新用户引导）──────────────────────────────────────────────
 
 function WelcomeScreen({ onStart }) {
-  const FEATURES = [
-    {
-      icon: '🪐',
-      title: '你有一颗专属星球',
-      desc: '它会随着你的每一个回答，生长出独一无二的地貌——山脉、海洋、晶体林、灯塔……',
-    },
-    {
-      icon: '💬',
-      title: '没有对错，只有真实',
-      desc: '我们会问你一些日常小问题。你的回答越真实，星球就越接近真实的你。',
-    },
-    {
-      icon: '🔍',
-      title: '发现你自己',
-      desc: '积累足够的回答后，你会得到一份专属画像——关于你是什么样的人。',
-    },
-  ]
-
   return (
-    <div className="space-y-8 py-2">
-      {/* 主标题 */}
-      <div className="text-center space-y-3 pt-2">
-        <p className="text-slate-500 text-xs tracking-widest uppercase">欢迎来到</p>
-        <h2 className="text-3xl font-bold text-white leading-tight">
-          你的<span className="text-indigo-400">星球</span>
-        </h2>
-        <p className="text-slate-400 text-sm leading-relaxed max-w-xs mx-auto">
-          这里没有测试，没有标准答案。<br />只有一颗在等待认识你的星球。
+    <div
+      className="relative flex flex-col justify-end"
+      style={{
+        minHeight: 'calc(100vh - 64px)',
+        backgroundImage: "url('/planet-bg.png')",
+        backgroundSize: 'cover',
+        backgroundPosition: 'center top',
+      }}
+    >
+      {/* 渐变遮罩：顶部透明 → 底部深黑，保证文字可读 */}
+      <div
+        className="absolute inset-0"
+        style={{
+          background: 'linear-gradient(to bottom, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.3) 40%, rgba(2,6,23,0.92) 75%, rgb(2,6,23) 100%)',
+        }}
+      />
+
+      {/* 内容区：浮在图片底部 */}
+      <div className="relative z-10 px-6 pb-10 pt-8 max-w-lg mx-auto w-full space-y-6">
+
+        {/* 标题 */}
+        <div className="text-center space-y-3">
+          <p className="text-amber-300/70 text-xs tracking-[0.3em] uppercase font-medium">
+            ThinkForge
+          </p>
+          <h2 className="text-4xl font-bold text-white leading-snug drop-shadow-lg">
+            你有一颗<br />
+            <span className="text-amber-300">专属星球</span>
+          </h2>
+          <p className="text-slate-300/90 text-sm leading-relaxed drop-shadow">
+            它会随着你的每一个回答，慢慢生长成<br />只属于你的样子
+          </p>
+        </div>
+
+        {/* 特性 pills */}
+        <div className="flex flex-wrap gap-2 justify-center">
+          {[
+            '没有对错，只有真实',
+            '积累问答，发现自己',
+            '云端保存，随时继续',
+          ].map((text, i) => (
+            <span
+              key={i}
+              className="text-xs text-amber-200/80 bg-black/40 backdrop-blur-sm border border-amber-400/25 rounded-full px-3 py-1"
+            >
+              {text}
+            </span>
+          ))}
+        </div>
+
+        {/* CTA 按钮 */}
+        <button
+          onClick={onStart}
+          className="w-full bg-amber-400 hover:bg-amber-300 active:scale-[0.98] text-slate-950 font-bold py-4 rounded-2xl transition-all text-base shadow-xl shadow-amber-500/30"
+        >
+          开始探索我的星球 →
+        </button>
+
+        <p className="text-center text-xs text-slate-500">
+          已有进度？登录后自动恢复
         </p>
       </div>
-
-      {/* 功能卡片 */}
-      <div className="space-y-3">
-        {FEATURES.map((f, i) => (
-          <div
-            key={i}
-            className="flex items-start gap-4 bg-slate-800/60 rounded-2xl px-5 py-4 border border-slate-700/50"
-          >
-            <span className="text-2xl mt-0.5 shrink-0">{f.icon}</span>
-            <div>
-              <p className="text-sm font-medium text-slate-200 mb-1">{f.title}</p>
-              <p className="text-xs text-slate-500 leading-relaxed">{f.desc}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* CTA */}
-      <button
-        onClick={onStart}
-        className="w-full bg-indigo-600 hover:bg-indigo-500 active:scale-[0.98] text-white font-semibold py-4 rounded-2xl transition-all text-base"
-      >
-        开始探索我的星球 →
-      </button>
-
-      <p className="text-center text-xs text-slate-600">
-        随时可以暂停，数据会保存在云端
-      </p>
     </div>
   )
 }
@@ -1527,7 +1534,7 @@ function ArenaTab({ onSwitchToPlanet }) {
           onChange={e => setArgument(e.target.value)}
           rows={4}
           placeholder={'输入你想分析的论点或观点…\n例如：「短视频正在摧毁年轻人的专注力」'}
-          className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 resize-none leading-relaxed"
+          className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-violet-500 resize-none leading-relaxed"
           onKeyDown={e => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAnalyze()
           }}
@@ -1550,7 +1557,7 @@ function ArenaTab({ onSwitchToPlanet }) {
         <button
           onClick={handleAnalyze}
           disabled={loading || !argument.trim()}
-          className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium py-3 rounded-xl transition-colors"
+          className="w-full bg-amber-400 hover:bg-amber-300 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-semibold py-3 rounded-xl transition-colors"
         >
           {loading ? '思维拆解中…' : '开始分析 ⌘↵'}
         </button>
