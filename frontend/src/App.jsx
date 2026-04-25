@@ -789,7 +789,7 @@ function buildPlanetTexture(THREE, traits, questionCount) {
   return new THREE.CanvasTexture(offscreen)
 }
 
-function PlanetVisual({ traits, questionCount, latestChanges }) {
+function PlanetVisual({ traits, questionCount, latestChanges, onClick }) {
 
   const mountRef = useRef(null)
   const sceneRef = useRef(null)   // { sphere, THREE, renderer }
