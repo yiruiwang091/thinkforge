@@ -451,7 +451,7 @@ function PlanetTab({ user }) {
   return (
     <div className="max-w-lg mx-auto px-6 py-8 space-y-8">
 
-      <PlanetVisual traits={traits} questionCount={history.length} />
+      <PlanetVisual traits={traits} questionCount={history.length} latestChanges={planetChanges} />
 
       {cloudError && (
         <p className="text-xs text-amber-600 text-center">{cloudError}</p>
@@ -664,359 +664,269 @@ function PlanetTab({ user }) {
   )
 }
 
-// ── 星球可视化（Canvas）──────────────────────────────────────────────────────
+// ── 星球可视化（Three.js 3D 程序生成星球）───────────────────────────────────
 
-function PlanetVisual({ traits, questionCount }) {
-  const canvasRef = useRef(null)
-  const animRef   = useRef(null)
-  const tRef      = useRef(0)
+/**
+ * 根据性格向量生成行星表面纹理（equirectangular map）
+ * 使用多层正弦波模拟 Perlin 噪声，不依赖额外库。
+ */
+function buildPlanetTexture(THREE, traits, questionCount) {
+  const W = 512, H = 256
+  const offscreen = document.createElement('canvas')
+  offscreen.width = W; offscreen.height = H
+  const ctx = offscreen.getContext('2d')
+  const img = ctx.createImageData(W, H)
+  const d   = img.data
+
+  const {
+    sensation_seeking:    ss  = 0.5,
+    emotional_depth:      ed  = 0.5,
+    creativity:           cr  = 0.5,
+    extraversion:         ex  = 0.5,
+    intuitive:            it  = 0.5,
+    memory_strength:      ms  = 0.5,
+    language_sensitivity: ls  = 0.5,
+    independence:         ind = 0.5,
+  } = traits
+
+  // 多倍频正弦噪声：terrain height in [-1, 1]
+  const noise = (lon, lat) => {
+    let h = 0
+    h += Math.sin(lon * 2.3 + 1.1) * Math.cos(lat * 1.7 + 0.4) * 0.40
+    h += Math.sin(lon * 5.7 + 2.8) * Math.cos(lat * 4.2 - 1.2) * 0.25
+    h += Math.sin(lon * 11  + 0.3) * Math.cos(lat * 8.5 + 2.1) * 0.15
+    h += Math.sin(lon * 3.1 - 0.9) * Math.cos(lat * 2.9 + 0.7) * 0.20
+    // 极地压低（模拟冰盖）
+    h -= Math.pow(Math.abs(lat) / (Math.PI * 0.5), 2) * 0.3
+    return h
+  }
+
+  // 唤醒度：回答越多颜色越丰富
+  const awaken = Math.min(1, questionCount / 25)
+
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const lon = (x / W) * Math.PI * 2   // 0..2π
+      const lat = ((y / H) - 0.5) * Math.PI  // -π/2..π/2
+      const h   = noise(lon, lat)
+
+      let r, g, b
+
+      if (h < -0.15) {
+        // 深海 — emotional_depth 越高越深蓝
+        const depth = Math.min(1, (-h - 0.15) / 0.6)
+        r = Math.round(5  + ed * 20)
+        g = Math.round(20 + ed * 35)
+        b = Math.round(80 + ed * 120 + depth * 30)
+      } else if (h < 0.05) {
+        // 浅海/海岸
+        r = Math.round(30 + it * 30)
+        g = Math.round(70 + (1 - ss) * 40)
+        b = Math.round(100 + ed * 60)
+      } else if (h < 0.3) {
+        // 平原/草地 — extraversion 越高越明亮
+        r = Math.round(40  + ex * 60  + cr * 30)
+        g = Math.round(80  + ex * 50  + (1 - ss) * 40)
+        b = Math.round(20  + it * 40)
+      } else {
+        // 山地/高原
+        const ht = (h - 0.3) / 0.7
+        if (ss > 0.6 && ht > 0.4) {
+          // 火山 — sensation_seeking 高
+          r = Math.round(180 + ht * 60)
+          g = Math.round(40  + ht * 20)
+          b = 15
+        } else if (cr > 0.6) {
+          // 晶体高地 — creativity 高
+          r = Math.round(100 + ht * 80)
+          g = Math.round(20  + ht * 30)
+          b = Math.round(150 + ht * 80)
+        } else if (ms > 0.6) {
+          // 古城遗迹 — memory_strength 高（灰褐色）
+          r = Math.round(120 + ht * 60)
+          g = Math.round(100 + ht * 45)
+          b = Math.round(80  + ht * 30)
+        } else {
+          // 普通山脉
+          r = Math.round(90  + ht * 50)
+          g = Math.round(80  + ht * 45)
+          b = Math.round(65  + ht * 35)
+        }
+      }
+
+      // 极地冰盖 — independence 越高冰盖越小
+      const poleFactor = Math.max(0, Math.abs(lat) / (Math.PI * 0.5) - (0.75 + ind * 0.15))
+      if (poleFactor > 0) {
+        const ice = Math.min(1, poleFactor * 5)
+        r = Math.round(r + (220 - r) * ice)
+        g = Math.round(g + (235 - g) * ice)
+        b = Math.round(b + (255 - b) * ice)
+      }
+
+      // 语言敏感度：全球轻微增加"光晕"纹路
+      if (ls > 0.6) {
+        const pattern = Math.abs(Math.sin(lon * 18)) * 0.08 * (ls - 0.5)
+        r = Math.min(255, Math.round(r + r * pattern))
+        g = Math.min(255, Math.round(g + g * pattern))
+      }
+
+      // 唤醒效果：未回答时灰暗，越答越彩色
+      if (awaken < 1) {
+        const gray = r * 0.299 + g * 0.587 + b * 0.114
+        r = Math.round(r * awaken + gray * (1 - awaken))
+        g = Math.round(g * awaken + gray * (1 - awaken))
+        b = Math.round(b * awaken + gray * (1 - awaken))
+        const dark = 0.15 + awaken * 0.85
+        r = Math.round(r * dark); g = Math.round(g * dark); b = Math.round(b * dark)
+      }
+
+      const i = (y * W + x) * 4
+      d[i] = r; d[i+1] = g; d[i+2] = b; d[i+3] = 255
+    }
+  }
+
+  ctx.putImageData(img, 0, 0)
+  return new THREE.CanvasTexture(offscreen)
+}
+
+function PlanetVisual({ traits, questionCount, latestChanges }) {
+
+  const mountRef = useRef(null)
 
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    const W = canvas.width, H = canvas.height
-    const pr = 88, pcx = W / 2, pcy = H * 0.44
+    import('three').then((THREE) => {
+      const container = mountRef.current
+      if (!container) return
 
-    const reveal = (threshold) => Math.min(1, Math.max(0, (questionCount - threshold) / 5))
+      // ── Renderer ─────────────────────────────────────────────────────────
+      const W = container.clientWidth, H = container.clientHeight
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+      renderer.setPixelRatio(window.devicePixelRatio)
+      renderer.setSize(W, H)
+      renderer.setClearColor(0x000000, 0)
+      container.appendChild(renderer.domElement)
 
-    function drawStars(t) {
-      const stars = [
-        [22,18],[65,10],[115,28],[175,8],[235,22],[285,6],[308,32],
-        [45,48],[158,38],[268,42],[320,18],[95,12],[215,35],[42,72],[290,65]
-      ]
-      stars.forEach(([sx, sy], i) => {
-        const flicker = 0.3 + 0.5 * Math.abs(Math.sin(t * 1.1 + i * 0.7))
-        ctx.globalAlpha = flicker
-        ctx.fillStyle = i % 3 === 0 ? '#f5c97a' : '#e8d5ff'
-        ctx.beginPath()
-        ctx.arc(sx, sy, i % 4 === 0 ? 1.2 : 0.7, 0, Math.PI * 2)
-        ctx.fill()
-      })
-      ctx.globalAlpha = 1
-    }
+      // ── Scene & Camera ───────────────────────────────────────────────────
+      const scene  = new THREE.Scene()
+      const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 1000)
+      camera.position.set(0, 0.8, 2.6)  // 略微俯视
+      camera.lookAt(0, 0, 0)
 
-    function drawPlanetBase(t) {
-      const s = traits.sensation_seeking
-      const baseR = Math.round(18 + s * 45)
-      const baseG = Math.round(8  + s * 12)
-      const baseB = Math.round(55 + (1 - s) * 25)
-      ctx.fillStyle = `rgb(${baseR},${baseG},${baseB})`
-      ctx.fillRect(pcx - pr, pcy - pr, pr * 2, pr * 2)
-
-      ctx.fillStyle = `rgba(35,18,65,0.7)`
-      ctx.beginPath()
-      ctx.moveTo(pcx - 30, pcy - 60)
-      ctx.bezierCurveTo(pcx + 40, pcy - 75, pcx + 70, pcy - 20, pcx + 60, pcy + 25)
-      ctx.bezierCurveTo(pcx + 40, pcy + 60, pcx - 10, pcy + 50, pcx - 35, pcy + 20)
-      ctx.bezierCurveTo(pcx - 65, pcy - 10, pcx - 55, pcy - 45, pcx - 30, pcy - 60)
-      ctx.fill()
-    }
-
-    function drawWater(t) {
-      const alpha = traits.emotional_depth * 0.75 * reveal(5)
-      if (alpha < 0.02) return
-      const wave = Math.sin(t * 0.8) * 2
-      ctx.fillStyle = `rgba(28,95,180,${alpha})`
-      ctx.beginPath()
-      ctx.ellipse(pcx - 28, pcy + 18 + wave, 28 + traits.emotional_depth * 12, 16, 0.25, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = `rgba(40,130,200,${alpha * 0.6})`
-      ctx.beginPath()
-      ctx.ellipse(pcx + 38, pcy + 32 + wave * 0.7, 14, 9, -0.3, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.strokeStyle = `rgba(120,200,255,${alpha * 0.4})`
-      ctx.lineWidth = 0.8
-      ctx.beginPath()
-      ctx.arc(pcx - 28, pcy + 15 + wave, 12, Math.PI * 1.1, Math.PI * 1.9)
-      ctx.stroke()
-    }
-
-    function drawVolcanic(t) {
-      const intensity = (traits.sensation_seeking - 0.5) * 2
-      const alpha = Math.max(0, intensity) * reveal(8)
-      if (alpha < 0.02) return
-      ctx.strokeStyle = `rgba(220,80,20,${alpha * 0.8})`
-      ctx.lineWidth = 1.5
-      ctx.lineCap = 'round'
-      const cracks = [
-        [[pcx + 20, pcy - 30], [pcx + 35, pcy - 10], [pcx + 28, pcy + 8]],
-        [[pcx + 35, pcy - 10], [pcx + 50, pcy - 18]],
-        [[pcx + 28, pcy + 8],  [pcx + 42, pcy + 20]],
-      ]
-      cracks.forEach(pts => {
-        ctx.beginPath()
-        ctx.moveTo(pts[0][0], pts[0][1])
-        pts.slice(1).forEach(p => ctx.lineTo(p[0], p[1]))
-        ctx.stroke()
-      })
-      const lava = 0.4 + 0.4 * Math.abs(Math.sin(t * 2))
-      ctx.fillStyle = `rgba(255,120,30,${alpha * lava})`
-      ctx.beginPath(); ctx.arc(pcx + 35, pcy - 10, 3, 0, Math.PI * 2); ctx.fill()
-      ctx.beginPath(); ctx.arc(pcx + 28, pcy + 8,  2, 0, Math.PI * 2); ctx.fill()
-    }
-
-    function drawVegetation(t) {
-      const alpha = (traits.extraversion - 0.3) * 1.4 * reveal(3)
-      if (alpha < 0.02) return
-      ctx.fillStyle = `rgba(35,110,55,${Math.min(alpha, 0.7)})`
-      ctx.beginPath()
-      ctx.ellipse(pcx - 15, pcy - 32, 22 + traits.extraversion * 10, 14, 0.2, 0, Math.PI * 2)
-      ctx.fill()
-      if (traits.extraversion > 0.6 && reveal(10) > 0.5) {
-        const trees = [[pcx - 22, pcy - 42], [pcx - 8, pcy - 46], [pcx + 5, pcy - 40]]
-        trees.forEach(([tx, ty]) => {
-          ctx.fillStyle = `rgba(25,85,40,${alpha * 0.9})`
-          ctx.beginPath(); ctx.arc(tx, ty, 5, 0, Math.PI * 2); ctx.fill()
-          ctx.fillRect(tx - 1, ty, 2, 7)
-        })
+      // ── Stars ────────────────────────────────────────────────────────────
+      const starGeo = new THREE.BufferGeometry()
+      const starPos = new Float32Array(1800)
+      for (let i = 0; i < 1800; i += 3) {
+        const theta = Math.random() * Math.PI * 2
+        const phi   = Math.acos(2 * Math.random() - 1)
+        const r     = 40 + Math.random() * 20
+        starPos[i]   = r * Math.sin(phi) * Math.cos(theta)
+        starPos[i+1] = r * Math.sin(phi) * Math.sin(theta)
+        starPos[i+2] = r * Math.cos(phi)
       }
-    }
+      starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3))
+      scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({
+        color: 0xfff5e0, size: 0.12, transparent: true, opacity: 0.8,
+      })))
 
-    function drawCrystals(t) {
-      const rationality = 1 - traits.intuitive
-      const alpha = (rationality - 0.3) * 1.4 * reveal(12)
-      if (alpha < 0.02) return
-      const crystals = [[pcx - 50, pcy - 20, 8, 18], [pcx - 42, pcy - 28, 6, 14], [pcx - 56, pcy - 14, 5, 12]]
-      crystals.forEach(([cx2, cy2, w, h]) => {
-        ctx.fillStyle = `rgba(160,120,255,${alpha * 0.6})`
-        ctx.beginPath()
-        ctx.moveTo(cx2, cy2 - h)
-        ctx.lineTo(cx2 + w, cy2)
-        ctx.lineTo(cx2, cy2 + h * 0.3)
-        ctx.lineTo(cx2 - w, cy2)
-        ctx.closePath()
-        ctx.fill()
-        ctx.strokeStyle = `rgba(200,180,255,${alpha * 0.4})`
-        ctx.lineWidth = 0.5
-        ctx.stroke()
+      // ── Planet ───────────────────────────────────────────────────────────
+      const texture  = buildPlanetTexture(THREE, traits, questionCount)
+      const geo      = new THREE.SphereGeometry(1, 64, 64)
+      const mat      = new THREE.MeshPhongMaterial({
+        map:       texture,
+        shininess: 18,
+        specular:  new THREE.Color(0x222244),
       })
-    }
+      const sphere = new THREE.Mesh(geo, mat)
+      scene.add(sphere)
 
-    function drawCreativeTerrain(t) {
-      const alpha = (traits.creativity - 0.4) * 1.6 * reveal(15)
-      if (alpha < 0.02) return
-      const spots = [
-        [pcx - 5,  pcy + 38, 10, 6, `rgba(180,60,160,${alpha * 0.5})`],
-        [pcx + 20, pcy - 50, 7,  4, `rgba(60,180,160,${alpha * 0.6})`],
-        [pcx - 40, pcy + 10, 8,  5, `rgba(200,160,40,${alpha * 0.4})`],
-      ]
-      spots.forEach(([x, y, rx, ry, color]) => {
-        ctx.fillStyle = color
-        ctx.beginPath()
-        ctx.ellipse(x, y, rx, ry, Math.sin(t * 0.3), 0, Math.PI * 2)
-        ctx.fill()
+      // ── Atmosphere glow (additive shell) ────────────────────────────────
+      const atmoMat = new THREE.MeshPhongMaterial({
+        color:       new THREE.Color(0x4466ff),
+        transparent: true,
+        opacity:     0.06,
+        side:        THREE.FrontSide,
       })
-    }
+      scene.add(new THREE.Mesh(new THREE.SphereGeometry(1.04, 32, 32), atmoMat))
 
-    function drawMemoryWalls(t) {
-      const alpha = (traits.memory_strength - 0.4) * 1.6 * reveal(18)
-      if (alpha < 0.02) return
-      ctx.strokeStyle = `rgba(140,100,60,${alpha * 0.8})`
-      ctx.lineWidth = 2
-      ctx.lineCap = 'round'
-      const wallY = pcy + 42
-      ctx.beginPath()
-      ctx.moveTo(pcx - 35, wallY)
-      for (let i = 0; i < 5; i++) {
-        const x = pcx - 35 + i * 12
-        ctx.lineTo(x, wallY)
-        ctx.lineTo(x + 4, wallY - 6)
-        ctx.lineTo(x + 8, wallY - 6)
-        ctx.lineTo(x + 8, wallY)
+      // ── Lights ───────────────────────────────────────────────────────────
+      scene.add(new THREE.AmbientLight(0x223355, 0.6))
+      const sun = new THREE.DirectionalLight(0xffd090, 1.4)
+      sun.position.set(5, 3, 4)
+      scene.add(sun)
+
+      // ── Drag + Zoom controls ─────────────────────────────────────────────
+      let isDragging = false
+      let prevX = 0, prevY = 0
+      let velX = 0, velY = 0
+
+      const onDown = (e) => {
+        isDragging = true
+        prevX = e.clientX ?? e.touches?.[0]?.clientX ?? 0
+        prevY = e.clientY ?? e.touches?.[0]?.clientY ?? 0
+        velX = velY = 0
       }
-      ctx.stroke()
-      ctx.strokeStyle = `rgba(80,50,30,${alpha * 0.5})`
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.moveTo(pcx + 15, pcy + 15)
-      ctx.bezierCurveTo(pcx + 25, pcy + 30, pcx + 30, pcy + 45, pcx + 22, pcy + 55)
-      ctx.stroke()
-    }
-
-    function drawLanguageFeatures(t) {
-      const alpha = Math.abs(traits.language_sensitivity - 0.5) * 2 * reveal(20)
-      if (alpha < 0.02) return
-      if (traits.language_sensitivity > 0.5) {
-        const pulse = 0.6 + 0.4 * Math.abs(Math.sin(t * 0.5))
-        ctx.fillStyle = `rgba(200,170,100,${alpha * pulse * 0.7})`
-        ctx.fillRect(pcx + 45, pcy - 45, 6, 18)
-        ctx.fillRect(pcx + 52, pcy - 40, 5, 14)
-        ctx.fillStyle = `rgba(245,220,150,${alpha * pulse * 0.4})`
-        ctx.fillRect(pcx + 46, pcy - 43, 4, 1)
-        ctx.fillRect(pcx + 46, pcy - 40, 4, 1)
-        ctx.fillRect(pcx + 46, pcy - 37, 4, 1)
-      } else {
-        const pulse = 0.7 + 0.3 * Math.sin(t * 1.5)
-        ctx.fillStyle = `rgba(100,200,180,${alpha * pulse * 0.7})`
-        ctx.beginPath(); ctx.arc(pcx + 48, pcy - 38, 5, 0, Math.PI * 2); ctx.fill()
-        ctx.fillRect(pcx + 52, pcy - 38, 2, 12)
-        ctx.beginPath(); ctx.arc(pcx + 58, pcy - 30, 4, 0, Math.PI * 2); ctx.fill()
-        ctx.fillRect(pcx + 61, pcy - 30, 2, 10)
+      const onMove = (e) => {
+        if (!isDragging) return
+        const cx = e.clientX ?? e.touches?.[0]?.clientX ?? 0
+        const cy = e.clientY ?? e.touches?.[0]?.clientY ?? 0
+        velX = (cx - prevX) * 0.005
+        velY = (cy - prevY) * 0.005
+        sphere.rotation.y += velX
+        sphere.rotation.x += velY
+        sphere.rotation.x = Math.max(-1.2, Math.min(1.2, sphere.rotation.x))
+        prevX = cx; prevY = cy
       }
-    }
-
-    function drawIndependenceFeature(t) {
-      const alpha = reveal(25)
-      if (alpha < 0.02) return
-      const pulse = 0.5 + 0.5 * Math.abs(Math.sin(t * 1.2))
-      if (traits.independence > 0.55) {
-        ctx.fillStyle = `rgba(220,210,180,${alpha * 0.8})`
-        ctx.fillRect(pcx - 72, pcy - 55, 5, 22)
-        ctx.beginPath()
-        ctx.moveTo(pcx - 76, pcy - 55)
-        ctx.lineTo(pcx - 67, pcy - 55)
-        ctx.lineTo(pcx - 70, pcy - 65)
-        ctx.closePath()
-        ctx.fill()
-        ctx.fillStyle = `rgba(255,240,150,${alpha * pulse * 0.9})`
-        ctx.beginPath(); ctx.arc(pcx - 70, pcy - 62, 3, 0, Math.PI * 2); ctx.fill()
-      } else {
-        const village = [[pcx - 68, pcy + 30], [pcx - 58, pcy + 35], [pcx - 72, pcy + 40]]
-        village.forEach(([vx, vy], i) => {
-          ctx.fillStyle = `rgba(255,200,80,${alpha * (0.5 + 0.4 * Math.sin(t + i)) * 0.8})`
-          ctx.beginPath(); ctx.arc(vx, vy, 2, 0, Math.PI * 2); ctx.fill()
-        })
+      const onUp   = () => { isDragging = false }
+      const onWheel = (e) => {
+        camera.position.z = Math.max(1.4, Math.min(5, camera.position.z + e.deltaY * 0.003))
       }
-    }
 
-    function drawArrivalSymbols(t) {
-      const base = 0.12 + reveal(0) * 0.25
-      const circles = [
-        { x: pcx - 18, y: pcy - 12, r: 24, speed:  0.007, gap: 0.5 },
-        { x: pcx + 20, y: pcy + 14, r: 16, speed: -0.006, gap: 0.4 },
-        { x: pcx - 5,  y: pcy + 36, r: 10, speed:  0.009, gap: 0.8 },
-      ]
-      circles.forEach((c, i) => {
-        const visible = reveal(i * 8)
-        if (visible < 0.01) return
-        const pulse = 0.7 + 0.3 * Math.abs(Math.sin(t * 0.7 + i))
-        ctx.strokeStyle = `rgba(245,201,122,${base * pulse * visible})`
-        ctx.lineWidth = 1.2
-        ctx.lineCap = 'round'
-        ctx.beginPath()
-        ctx.arc(c.x + Math.sin(t * 0.2 + i) * 1.5, c.y + Math.cos(t * 0.25 + i) * 1.5,
-          c.r, c.gap + t * c.speed, Math.PI * 2 - c.gap * 0.6 + t * c.speed)
-        ctx.stroke()
-      })
-    }
+      renderer.domElement.addEventListener('mousedown',  onDown)
+      renderer.domElement.addEventListener('mousemove',  onMove)
+      renderer.domElement.addEventListener('mouseup',    onUp)
+      renderer.domElement.addEventListener('mouseleave', onUp)
+      renderer.domElement.addEventListener('touchstart', onDown, { passive: true })
+      renderer.domElement.addEventListener('touchmove',  onMove, { passive: true })
+      renderer.domElement.addEventListener('touchend',   onUp)
+      renderer.domElement.addEventListener('wheel',      onWheel, { passive: true })
 
-    function drawFog() {
-      const revealed = Math.min(1, questionCount / 50)
-      if (revealed >= 1) return
-      const fogAlpha = (1 - revealed) * 0.82
-      const fogGrad = ctx.createLinearGradient(pcx, pcy - pr, pcx, pcy + pr)
-      fogGrad.addColorStop(0, `rgba(5,8,20,0)`)
-      fogGrad.addColorStop(revealed * 0.8,           `rgba(5,8,20,0)`)
-      fogGrad.addColorStop(Math.min(revealed + 0.2, 1), `rgba(5,8,20,${fogAlpha * 0.5})`)
-      fogGrad.addColorStop(1, `rgba(5,8,20,${fogAlpha})`)
-      ctx.fillStyle = fogGrad
-      ctx.fillRect(pcx - pr, pcy - pr, pr * 2, pr * 2)
-    }
+      // ── Animation loop ───────────────────────────────────────────────────
+      let animId
+      function animate() {
+        animId = requestAnimationFrame(animate)
+        if (!isDragging) {
+          sphere.rotation.y += 0.0015 + velX
+          velX *= 0.94; velY *= 0.94
+        }
+        renderer.render(scene, camera)
+      }
+      animate()
 
-    function draw() {
-      ctx.clearRect(0, 0, W, H)
-      const t = tRef.current
-
-      ctx.fillStyle = '#020917'
-      ctx.fillRect(0, 0, W, H)
-
-      const horizon = ctx.createRadialGradient(pcx, H * 0.88, 0, pcx, H * 0.88, W * 0.55)
-      horizon.addColorStop(0, 'rgba(120,50,20,0.25)')
-      horizon.addColorStop(1, 'rgba(0,0,0,0)')
-      ctx.fillStyle = horizon
-      ctx.fillRect(0, 0, W, H)
-
-      drawStars(t)
-
-      ctx.save()
-      ctx.beginPath()
-      ctx.arc(pcx, pcy, pr, 0, Math.PI * 2)
-      ctx.clip()
-
-      drawPlanetBase(t)
-      drawWater(t)
-      drawVegetation(t)
-      drawVolcanic(t)
-      drawCrystals(t)
-      drawCreativeTerrain(t)
-      drawMemoryWalls(t)
-      drawLanguageFeatures(t)
-      drawIndependenceFeature(t)
-      drawArrivalSymbols(t)
-      drawFog()
-
-      ctx.restore()
-
-      // 大气光晕
-      const atmo = ctx.createRadialGradient(pcx, pcy, pr - 4, pcx, pcy, pr + 20)
-      atmo.addColorStop(0, 'rgba(0,0,0,0)')
-      const s = traits.sensation_seeking
-      atmo.addColorStop(0.5, `rgba(${Math.round(100+s*80)},${Math.round(40+s*20)},${Math.round(180-s*60)},0.08)`)
-      atmo.addColorStop(1, 'rgba(0,0,0,0)')
-      ctx.fillStyle = atmo
-      ctx.beginPath(); ctx.arc(pcx, pcy, pr + 20, 0, Math.PI * 2); ctx.fill()
-
-      ctx.strokeStyle = 'rgba(245,201,122,0.35)'
-      ctx.lineWidth = 1
-      ctx.beginPath(); ctx.arc(pcx, pcy, pr, 0, Math.PI * 2); ctx.stroke()
-
-      // 轨道环 + 月亮
-      ctx.save()
-      ctx.translate(pcx, pcy)
-      ctx.rotate(0.28)
-      ctx.strokeStyle = 'rgba(245,201,122,0.14)'
-      ctx.lineWidth = 0.8
-      ctx.setLineDash([5, 9])
-      ctx.beginPath()
-      ctx.ellipse(0, 0, pr + 26, 10, 0, 0, Math.PI * 2)
-      ctx.stroke()
-      ctx.setLineDash([])
-      const ma = t * 0.32
-      ctx.fillStyle = 'rgba(240,232,208,0.88)'
-      ctx.beginPath()
-      ctx.arc(Math.cos(ma) * (pr + 26), Math.sin(ma) * 10, 3.8, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.restore()
-
-      // 底部人影
-      ctx.fillStyle = 'rgba(2,9,23,0.9)'
-      ctx.beginPath()
-      ctx.ellipse(pcx, H * 0.94, W * 0.45, H * 0.08, 0, 0, Math.PI * 2)
-      ctx.fill()
-      const fx = pcx - 22, fy = H * 0.875
-      ctx.fillStyle = 'rgba(5,12,28,0.95)'
-      ctx.beginPath(); ctx.ellipse(fx, fy + 13, 5, 10, 0, 0, Math.PI * 2); ctx.fill()
-      ctx.beginPath(); ctx.arc(fx, fy + 2, 4, 0, Math.PI * 2); ctx.fill()
-
-      // 进度文字
-      const depth = questionCount <= 20
-        ? Math.round(questionCount / 20 * 100) + '% 地表'
-        : questionCount <= 50
-          ? Math.round((questionCount - 20) / 30 * 100) + '% 深层'
-          : Math.round((questionCount - 50) / 50 * 100) + '% 精微'
-      ctx.fillStyle = 'rgba(148,163,184,0.65)'
-      ctx.font = '11px sans-serif'
-      ctx.textAlign = 'center'
-      ctx.fillText(`已探索 ${questionCount} 题 · ${depth}`, pcx, pcy + pr + 22)
-
-      tRef.current += 0.011
-      animRef.current = requestAnimationFrame(draw)
-    }
-
-    draw()
-    return () => cancelAnimationFrame(animRef.current)
+      // ── Cleanup ──────────────────────────────────────────────────────────
+      return () => {
+        cancelAnimationFrame(animId)
+        renderer.dispose()
+        if (container.contains(renderer.domElement)) container.removeChild(renderer.domElement)
+      }
+    })
   }, [traits, questionCount])
 
+  const depthLabel = questionCount === 0
+    ? '等待第一道光…'
+    : questionCount <= 20 ? `已探索 ${questionCount} 题 · 地表`
+    : questionCount <= 50 ? `已探索 ${questionCount} 题 · 深层`
+    : `已探索 ${questionCount} 题 · 精微`
+
   return (
-    <canvas
-      ref={canvasRef}
-      width={340}
-      height={280}
-      className="w-full rounded-2xl"
-    />
+    <div className="relative w-full rounded-2xl overflow-hidden bg-slate-950" style={{ aspectRatio: '1 / 1' }}>
+      <div ref={mountRef} className="absolute inset-0" style={{ cursor: 'grab' }} />
+      <p className="absolute bottom-2 left-0 right-0 text-center text-xs text-slate-500 pointer-events-none">
+        {depthLabel}
+      </p>
+    </div>
   )
 }
+
 
 // ── TraitDebugPanel ──────────────────────────────────────────────────────────
 
@@ -1319,7 +1229,7 @@ function WelcomeScreen({ onStart }) {
       className="relative flex flex-col justify-end"
       style={{
         minHeight: 'calc(100vh - 64px)',
-        backgroundImage: "url('/planet-bg.png')",
+        backgroundImage: "url('/planet-bg.jpg')",
         backgroundSize: 'cover',
         backgroundPosition: 'center top',
       }}
